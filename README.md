@@ -32,7 +32,7 @@ pip install -r requirements.txt
 ```
 
 ## Data preparation
-If you already have CIFAR-100 or ImageNet-R, pass your dataset path to  `--data-path`.
+If you already have CIFAR-100, CUB200, or ImageNet-R, pass your dataset path to  `--data-path`.
 
 
 The datasets aren't ready, change the download argument in `datasets.py` as follows
@@ -47,6 +47,11 @@ datasets.CIFAR100(download=True)
 Imagenet_R(download=True)
 ```
 
+**CUB200**
+```
+CUB200(download=True)
+```
+
 ## Training
 To train a model via command line:
 
@@ -55,7 +60,7 @@ Single node with single gpu
 python -m torch.distributed.launch \
         --nproc_per_node=1 \
         --use_env main.py \
-        <cifar100_dualprompt or imr_dualprompt> \
+        <cifar100_dualprompt or cub200_dualprompt or imr_dualprompt> \
         --model vit_base_patch16_224 \
         --batch-size 24 \
         --data-path /local_datasets/ \
@@ -67,7 +72,7 @@ Single node with multi gpus
 python -m torch.distributed.launch \
         --nproc_per_node=<Num GPUs> \
         --use_env main.py \
-        <cifar100_dualprompt or imr_dualprompt> \
+        <cifar100_dualprompt or cub200_dualprompt or imr_dualprompt> \
         --model vit_base_patch16_224 \
         --batch-size 24 \
         --data-path /local_datasets/ \
@@ -87,7 +92,7 @@ pip install submitit
 To train a model on 2 nodes with 4 gpus each:
 
 ```
-python run_with_submitit.py <cifar100_dualprompt or imr_dualprompt> --shared_folder <Absolute Path of shared folder for all nodes>
+python run_with_submitit.py <cifar100_dualprompt or cub200_dualprompt or imr_dualprompt> --shared_folder <Absolute Path of shared folder for all nodes>
 ```
 
 Absolute Path of shared folder must be accessible from all nodes.<br>
@@ -96,7 +101,7 @@ According to your environment, you can use `NCLL_SOCKET_IFNAME=<Your own IP inte
 ## Evaluation
 To evaluate a trained model:
 ```
-python -m torch.distributed.launch --nproc_per_node=1 --use_env main.py <cifar100_dualprompt or imr_dualprompt> --eval
+python -m torch.distributed.launch --nproc_per_node=1 --use_env main.py <cifar100_dualprompt or cub200_dualprompt or imr_dualprompt> --eval
 ```
 
 ## Result

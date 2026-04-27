@@ -28,6 +28,9 @@ def parse_args():
     if config == 'cifar100_dualprompt':
         from configs.cifar100_dualprompt import get_args_parser
         config_parser = subparser.add_parser('cifar100_dualprompt', help='Split-CIFAR100 DualPrompt configs')
+    elif config == 'cub200_dualprompt':
+        from configs.cub200_dualprompt import get_args_parser
+        config_parser = subparser.add_parser('cub200_dualprompt', help='Split-CUB200 DualPrompt configs')
     elif config == 'imr_dualprompt':
         from configs.imr_dualprompt import get_args_parser
         config_parser = subparser.add_parser('imr_dualprompt', help='Split-ImageNet-R DualPrompt configs')
