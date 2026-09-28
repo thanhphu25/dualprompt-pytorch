@@ -23,6 +23,7 @@ from timm.optim import create_optimizer
 
 from datasets import build_continual_dataloader
 from engine import *
+from quantum_measurement import QuantumMeasurement
 import models
 import utils
 
@@ -97,6 +98,11 @@ def main(args):
     
     print(args)
 
+    qm = None
+    if args.qm_eval:
+        assert class_mask is not None, '--qm_eval needs class_mask (keep --train_mask true)'
+        qm = QuantumMeasurement(args, model.embed_dim, device)
+
     if args.eval:
         acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
 
@@ -104,13 +110,18 @@ def main(args):
             checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_checkpoint.pth'.format(task_id+1))
             if os.path.exists(checkpoint_path):
                 print('Loading checkpoint from:', checkpoint_path)
-                checkpoint = torch.load(checkpoint_path)
+                checkpoint = torch.load(checkpoint_path, map_location='cpu')
                 model.load_state_dict(checkpoint['model'])
             else:
                 print('No checkpoint found at:', checkpoint_path)
                 return
+            if qm is not None and not qm.load_state_dict(checkpoint.get('qm_banks', {})):
+                # checkpoint without banks: rebuild this task's classes from the model of the same task
+                qm.consolidate(model, original_model, data_loader[task_id], class_mask[task_id], task_id, device)
             _ = evaluate_till_now(model, original_model, data_loader, device, 
-                                            task_id, class_mask, acc_matrix, args,)
+                                            task_id, class_mask, acc_matrix, args, qm=qm)
+        if qm is not None:
+            qm.print_table(args.num_tasks - 1)
         
         return
 
@@ -142,7 +153,7 @@ def main(args):
 
     train_and_evaluate(model, model_without_ddp, original_model,
                     criterion, data_loader, optimizer, lr_scheduler,
-                    device, class_mask, args)
+                    device, class_mask, args, qm=qm)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

@@ -92,7 +92,10 @@ def train_one_epoch(model: torch.nn.Module, original_model: torch.nn.Module,
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module, original_model: torch.nn.Module, data_loader, 
-            device, task_id=-1, class_mask=None, args=None,):
+            device, task_id=-1, class_mask=None, args=None, qm=None, stage=None):
+    if qm is not None:
+        return qm.evaluate(model, original_model, data_loader, device, task_id, stage, class_mask, args)
+
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -144,12 +147,12 @@ def evaluate(model: torch.nn.Module, original_model: torch.nn.Module, data_loade
 
 @torch.no_grad()
 def evaluate_till_now(model: torch.nn.Module, original_model: torch.nn.Module, data_loader, 
-                    device, task_id=-1, class_mask=None, acc_matrix=None, args=None,):
+                    device, task_id=-1, class_mask=None, acc_matrix=None, args=None, qm=None):
     stat_matrix = np.zeros((3, args.num_tasks)) # 3 for Acc@1, Acc@5, Loss
 
     for i in range(task_id+1):
         test_stats = evaluate(model=model, original_model=original_model, data_loader=data_loader[i]['val'], 
-                            device=device, task_id=i, class_mask=class_mask, args=args)
+                            device=device, task_id=i, class_mask=class_mask, args=args, qm=qm, stage=task_id)
 
         stat_matrix[0, i] = test_stats['Acc@1']
         stat_matrix[1, i] = test_stats['Acc@5']
@@ -169,12 +172,14 @@ def evaluate_till_now(model: torch.nn.Module, original_model: torch.nn.Module, d
 
         result_str += "\tForgetting: {:.4f}\tBackward: {:.4f}".format(forgetting, backward)
     print(result_str)
+    if qm is not None:
+        qm.end_stage(task_id)
 
     return test_stats
 
 def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Module, original_model: torch.nn.Module, 
                     criterion, data_loader: Iterable, optimizer: torch.optim.Optimizer, lr_scheduler, device: torch.device, 
-                    class_mask=None, args = None,):
+                    class_mask=None, args = None, qm=None):
 
     # create matrix to save end-of-task accuracies 
     acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
@@ -237,8 +242,12 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             if lr_scheduler:
                 lr_scheduler.step(epoch)
 
+        if qm is not None:
+            # class states from this task's train split; E-prompt of task_id and all older ones are final now
+            qm.consolidate(model, original_model, data_loader[task_id], class_mask[task_id], task_id, device)
+
         test_stats = evaluate_till_now(model=model, original_model=original_model, data_loader=data_loader, device=device, 
-                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args)
+                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args, qm=qm)
         if args.output_dir and utils.is_main_process():
             Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
             
@@ -251,6 +260,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 }
             if args.sched is not None and args.sched != 'constant':
                 state_dict['lr_scheduler'] = lr_scheduler.state_dict()
+            if qm is not None:
+                state_dict['qm_banks'] = qm.state_dict()
             
             utils.save_on_master(state_dict, checkpoint_path)
 
@@ -261,3 +272,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         if args.output_dir and utils.is_main_process():
             with open(os.path.join(args.output_dir, '{}_stats.txt'.format(datetime.datetime.now().strftime('log_%Y_%m_%d_%H_%M'))), 'a') as f:
                 f.write(json.dumps(log_stats) + '\n')
+
+    if qm is not None:
+        qm.print_table(args.num_tasks - 1)

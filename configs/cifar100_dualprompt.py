@@ -1,5 +1,8 @@
 import argparse
 
+from utils import str2bool
+from quantum_measurement import add_qm_args
+
 def get_args_parser(subparsers):
     subparsers.add_argument('--batch-size', default=24, type=int, help='Batch size per device')
     subparsers.add_argument('--epochs', default=5, type=int)
@@ -18,7 +21,7 @@ def get_args_parser(subparsers):
     subparsers.add_argument('--clip-grad', type=float, default=1.0, metavar='NORM',  help='Clip gradient norm (default: None, no clipping)')
     subparsers.add_argument('--momentum', type=float, default=0.9, metavar='M', help='SGD momentum (default: 0.9)')
     subparsers.add_argument('--weight-decay', type=float, default=0.0, help='weight decay (default: 0.0)')
-    subparsers.add_argument('--reinit_optimizer', type=bool, default=True, help='reinit optimizer (default: True)')
+    subparsers.add_argument('--reinit_optimizer', type=str2bool, default=True, help='reinit optimizer (default: True)')
 
     # Learning rate schedule parameters
     subparsers.add_argument('--sched', default='constant', type=str, metavar='SCHEDULER', help='LR scheduler (default: "constant"')
@@ -33,7 +36,7 @@ def get_args_parser(subparsers):
     subparsers.add_argument('--cooldown-epochs', type=int, default=10, metavar='N', help='epochs to cooldown LR at min_lr, after cyclic schedule ends')
     subparsers.add_argument('--patience-epochs', type=int, default=10, metavar='N', help='patience epochs for Plateau LR scheduler (default: 10')
     subparsers.add_argument('--decay-rate', '--dr', type=float, default=0.1, metavar='RATE', help='LR decay rate (default: 0.1)')
-    subparsers.add_argument('--unscale_lr', type=bool, default=True, help='scaling lr by batch size (default: True)')
+    subparsers.add_argument('--unscale_lr', type=str2bool, default=True, help='scaling lr by batch size (default: True)')
 
     # Augmentation parameters
     subparsers.add_argument('--color-jitter', type=float, default=None, metavar='PCT', help='Color jitter factor (default: 0.3)')
@@ -71,38 +74,38 @@ def get_args_parser(subparsers):
 
     # Continual learning parameters
     subparsers.add_argument('--num_tasks', default=10, type=int, help='number of sequential tasks')
-    subparsers.add_argument('--train_mask', default=True, type=bool, help='if using the class mask at training')
-    subparsers.add_argument('--task_inc', default=False, type=bool, help='if doing task incremental')
+    subparsers.add_argument('--train_mask', default=True, type=str2bool, help='if using the class mask at training')
+    subparsers.add_argument('--task_inc', default=False, type=str2bool, help='if doing task incremental')
 
     # G-Prompt parameters
-    subparsers.add_argument('--use_g_prompt', default=True, type=bool, help='if using G-Prompt')
+    subparsers.add_argument('--use_g_prompt', default=True, type=str2bool, help='if using G-Prompt')
     subparsers.add_argument('--g_prompt_length', default=5, type=int, help='length of G-Prompt')
     subparsers.add_argument('--g_prompt_layer_idx', default=[0, 1], type=int, nargs = "+", help='the layer index of the G-Prompt')
-    subparsers.add_argument('--use_prefix_tune_for_g_prompt', default=True, type=bool, help='if using the prefix tune for G-Prompt')
+    subparsers.add_argument('--use_prefix_tune_for_g_prompt', default=True, type=str2bool, help='if using the prefix tune for G-Prompt')
     
     # E-Prompt parameters
-    subparsers.add_argument('--use_e_prompt', default=True, type=bool, help='if using the E-Prompt')
+    subparsers.add_argument('--use_e_prompt', default=True, type=str2bool, help='if using the E-Prompt')
     subparsers.add_argument('--e_prompt_layer_idx', default=[2, 3, 4], type=int, nargs = "+", help='the layer index of the E-Prompt')
-    subparsers.add_argument('--use_prefix_tune_for_e_prompt', default=True, type=bool, help='if using the prefix tune for E-Prompt')
+    subparsers.add_argument('--use_prefix_tune_for_e_prompt', default=True, type=str2bool, help='if using the prefix tune for E-Prompt')
 
     # Use prompt pool in L2P to implement E-Prompt
-    subparsers.add_argument('--prompt_pool', default=True, type=bool,)
+    subparsers.add_argument('--prompt_pool', default=True, type=str2bool,)
     subparsers.add_argument('--size', default=10, type=int,)
     subparsers.add_argument('--length', default=5,type=int, )
     subparsers.add_argument('--top_k', default=1, type=int, )
     subparsers.add_argument('--initializer', default='uniform', type=str,)
-    subparsers.add_argument('--prompt_key', default=True, type=bool,)
+    subparsers.add_argument('--prompt_key', default=True, type=str2bool,)
     subparsers.add_argument('--prompt_key_init', default='uniform', type=str)
-    subparsers.add_argument('--use_prompt_mask', default=True, type=bool)
-    subparsers.add_argument('--mask_first_epoch', default=False, type=bool)
-    subparsers.add_argument('--shared_prompt_pool', default=True, type=bool)
-    subparsers.add_argument('--shared_prompt_key', default=False, type=bool)
-    subparsers.add_argument('--batchwise_prompt', default=True, type=bool)
+    subparsers.add_argument('--use_prompt_mask', default=True, type=str2bool)
+    subparsers.add_argument('--mask_first_epoch', default=False, type=str2bool)
+    subparsers.add_argument('--shared_prompt_pool', default=True, type=str2bool)
+    subparsers.add_argument('--shared_prompt_key', default=False, type=str2bool)
+    subparsers.add_argument('--batchwise_prompt', default=True, type=str2bool)
     subparsers.add_argument('--embedding_key', default='cls', type=str)
     subparsers.add_argument('--predefined_key', default='', type=str)
     subparsers.add_argument('--pull_constraint', default=True)
     subparsers.add_argument('--pull_constraint_coeff', default=1.0, type=float)
-    subparsers.add_argument('--same_key_value', default=False, type=bool)
+    subparsers.add_argument('--same_key_value', default=False, type=str2bool)
 
     # ViT parameters
     subparsers.add_argument('--global_pool', default='token', choices=['token', 'avg'], type=str, help='type of global pooling for final sequence')
@@ -111,3 +114,6 @@ def get_args_parser(subparsers):
 
     # Misc parameters
     subparsers.add_argument('--print_freq', type=int, default=10, help = 'The frequency of printing')
+
+    # Quantum-measurement readouts (eval-time only, see plan-quantum.md)
+    add_qm_args(subparsers)

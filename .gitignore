@@ -3,3 +3,6 @@
 checkpoint/
 *.out
 *.err
+**/paper/**
+**/docs/**
+plan-quantum.md

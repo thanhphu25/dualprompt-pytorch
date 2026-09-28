@@ -515,7 +515,7 @@ class VisionTransformer(nn.Module):
             self.global_pool = global_pool
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
-    def forward_features(self, x, task_id=-1, cls_features=None, train=False):
+    def forward_features(self, x, task_id=-1, cls_features=None, train=False, prompt_idx=None):
         x = self.patch_embed(x)
 
         if self.cls_token is not None:
@@ -527,7 +527,11 @@ class VisionTransformer(nn.Module):
             x = checkpoint_seq(self.blocks, x)
         else:
             if self.use_g_prompt or self.use_e_prompt:
-                if self.use_prompt_mask and train:
+                if prompt_idx is not None:
+                    # force the E-prompt of task prompt_idx[b] for every image b (eval-time routing)
+                    k = self.e_prompt.top_k
+                    prompt_mask = prompt_idx.view(-1, 1) * k + torch.arange(k, device=x.device)
+                elif self.use_prompt_mask and train:
                     start = task_id * self.e_prompt.top_k
                     end = (task_id + 1) * self.e_prompt.top_k
                     single_prompt_mask = torch.arange(start, end).to(x.device)
@@ -602,8 +606,8 @@ class VisionTransformer(nn.Module):
         
         return res
 
-    def forward(self, x, task_id=-1, cls_features=None, train=False):
-        res = self.forward_features(x, task_id=task_id, cls_features=cls_features, train=train)
+    def forward(self, x, task_id=-1, cls_features=None, train=False, prompt_idx=None):
+        res = self.forward_features(x, task_id=task_id, cls_features=cls_features, train=train, prompt_idx=prompt_idx)
         res = self.forward_head(res)
         return res
 
