@@ -2,9 +2,11 @@ import argparse
 
 from utils import str2bool
 
+# Split-CUB200 uses the Split-ImageNet-R hyper-parameters (high-resolution natural images);
+# 20 tasks x 10 classes and 20 epochs match the RainbowPrompt CUB-200 runs in plan-head.md
 def get_args_parser(subparsers):
     subparsers.add_argument('--batch-size', default=24, type=int, help='Batch size per device')
-    subparsers.add_argument('--epochs', default=50, type=int)
+    subparsers.add_argument('--epochs', default=20, type=int)
 
     # Model parameters
     subparsers.add_argument('--model', default='vit_base_patch16_224', type=str, metavar='MODEL', help='Name of model to train')
@@ -53,7 +55,7 @@ def get_args_parser(subparsers):
 
     # Data parameters
     subparsers.add_argument('--data-path', default='/local_datasets/', type=str, help='dataset path')
-    subparsers.add_argument('--dataset', default='Split-Imagenet-R', type=str, help='dataset name')
+    subparsers.add_argument('--dataset', default='Split-CUB200', type=str, help='dataset name')
     subparsers.add_argument('--shuffle', default=False, type=str2bool, help='shuffle the data order')
     subparsers.add_argument('--output_dir', default='./output', help='path where to save, empty for no saving')
     subparsers.add_argument('--device', default='cuda', help='device to use for training / testing')
@@ -72,7 +74,7 @@ def get_args_parser(subparsers):
     subparsers.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
     # Continual learning parameters
-    subparsers.add_argument('--num_tasks', default=10, type=int, help='number of sequential tasks')
+    subparsers.add_argument('--num_tasks', default=20, type=int, help='number of sequential tasks')
     subparsers.add_argument('--train_mask', default=True, type=str2bool, help='if using the class mask at training')
     subparsers.add_argument('--task_inc', default=False, type=str2bool, help='if doing task incremental')
 
@@ -89,7 +91,7 @@ def get_args_parser(subparsers):
 
     # Use prompt pool in L2P to implement E-Prompt
     subparsers.add_argument('--prompt_pool', default=True, type=str2bool,)
-    subparsers.add_argument('--size', default=10, type=int,)
+    subparsers.add_argument('--size', default=20, type=int,)
     subparsers.add_argument('--length', default=20,type=int, )
     subparsers.add_argument('--top_k', default=1, type=int, )
     subparsers.add_argument('--initializer', default='uniform', type=str,)

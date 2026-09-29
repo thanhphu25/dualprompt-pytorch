@@ -7,6 +7,7 @@
 # -- Jaeho Lee, dlwogh9344@khu.ac.kr
 # ------------------------------------------
 
+import copy
 import random
 
 import torch
@@ -30,12 +31,23 @@ class Lambda(transforms.Lambda):
 def target_transform(x, nb_classes):
     return x + nb_classes
 
+def _with_transform(dataset, transform, cache):
+    # shallow copy of the (underlying) dataset with another transform; Subset indices are kept
+    if isinstance(dataset, Subset):
+        return Subset(_with_transform(dataset.dataset, transform, cache), dataset.indices)
+    if id(dataset) not in cache:
+        ds = copy.copy(dataset)
+        ds.transform = transform
+        cache[id(dataset)] = ds
+    return cache[id(dataset)]
+
 def build_continual_dataloader(args):
     dataloader = list()
     class_mask = list() if args.task_inc or args.train_mask else None
 
     transform_train = build_transform(True, args)
     transform_val = build_transform(False, args)
+    eval_copies = {}
 
     if args.dataset.startswith('Split-'):
         dataset_train, dataset_val = get_dataset(args.dataset.replace('Split-',''), transform_train, transform_val, args)
@@ -98,7 +110,19 @@ def build_continual_dataloader(args):
             pin_memory=args.pin_mem,
         )
 
-        dataloader.append({'train': data_loader_train, 'val': data_loader_val})
+        loaders = {'train': data_loader_train, 'val': data_loader_val}
+
+        if getattr(args, 'density_heads', False):
+            # train split with the eval transform, used to build class statistics after each task
+            loaders['train_eval'] = torch.utils.data.DataLoader(
+                _with_transform(dataset_train, transform_val, eval_copies),
+                sampler=torch.utils.data.SequentialSampler(dataset_train),
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                pin_memory=args.pin_mem,
+            )
+
+        dataloader.append(loaders)
 
     return dataloader, class_mask
 

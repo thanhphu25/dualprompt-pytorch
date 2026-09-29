@@ -22,6 +22,7 @@ from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 
 from datasets import build_continual_dataloader
+from density_head import DensityHeads, HeadMetrics, add_density_args
 from engine import *
 import models
 import utils
@@ -97,6 +98,15 @@ def main(args):
     
     print(args)
 
+    density, head_metrics = None, None
+    if args.density_heads:
+        if args.distributed and utils.get_world_size() > 1:
+            print('Density heads do not aggregate statistics across processes; disabled under multi-GPU DDP')
+        else:
+            density = DensityHeads(args, dim=model.num_features)
+            head_metrics = HeadMetrics(args.num_tasks)
+            print(f'Density heads: {density.config()}')
+
     if args.eval:
         acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
 
@@ -104,13 +114,28 @@ def main(args):
             checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_checkpoint.pth'.format(task_id+1))
             if os.path.exists(checkpoint_path):
                 print('Loading checkpoint from:', checkpoint_path)
-                checkpoint = torch.load(checkpoint_path)
+                try:
+                    # torch>=2.6 defaults to weights_only=True, which rejects the argparse Namespace in the checkpoint
+                    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+                except TypeError:  # torch<1.13 has no weights_only
+                    checkpoint = torch.load(checkpoint_path, map_location='cpu')
                 model.load_state_dict(checkpoint['model'])
             else:
                 print('No checkpoint found at:', checkpoint_path)
                 return
+            if density is not None:
+                if 'density_bank' in checkpoint:
+                    # keep --density_ranks / weights / eps from the command line, not the ones saved at training
+                    density.load_state_dict(checkpoint['density_bank'], use_saved_config=False)
+                    if task_id == 0:
+                        print(f'Density heads (offline): {density.config()}')
+                else:
+                    print('No density_bank in checkpoint; density heads skipped')
+                    density, head_metrics = None, None
             _ = evaluate_till_now(model, original_model, data_loader, device, 
-                                            task_id, class_mask, acc_matrix, args,)
+                                            task_id, class_mask, acc_matrix, args,
+                                            density=density, head_metrics=head_metrics,
+                                            head_prefix='density_heads_eval')
         
         return
 
@@ -142,7 +167,7 @@ def main(args):
 
     train_and_evaluate(model, model_without_ddp, original_model,
                     criterion, data_loader, optimizer, lr_scheduler,
-                    device, class_mask, args)
+                    device, class_mask, args, density=density, head_metrics=head_metrics)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -161,10 +186,14 @@ if __name__ == '__main__':
     elif config == 'imr_dualprompt':
         from configs.imr_dualprompt import get_args_parser
         config_parser = subparser.add_parser('imr_dualprompt', help='Split-ImageNet-R DualPrompt configs')
+    elif config == 'cub200_dualprompt':
+        from configs.cub200_dualprompt import get_args_parser
+        config_parser = subparser.add_parser('cub200_dualprompt', help='Split-CUB200 DualPrompt configs')
     else:
         raise NotImplementedError
         
     get_args_parser(config_parser)
+    add_density_args(config_parser)
 
     args = parser.parse_args()
     

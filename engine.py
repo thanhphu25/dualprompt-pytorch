@@ -10,6 +10,7 @@
 Train and eval functions used in main.py
 """
 import math
+import random
 import sys
 import os
 import datetime
@@ -92,8 +93,10 @@ def train_one_epoch(model: torch.nn.Module, original_model: torch.nn.Module,
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module, original_model: torch.nn.Module, data_loader, 
-            device, task_id=-1, class_mask=None, args=None,):
+            device, task_id=-1, class_mask=None, args=None, density=None):
     criterion = torch.nn.CrossEntropyLoss()
+    use_density = density is not None and len(density) > 0
+    head_correct, head_total = {}, 0
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test: [Task {}]'.format(task_id + 1)
@@ -134,28 +137,42 @@ def evaluate(model: torch.nn.Module, original_model: torch.nn.Module, data_loade
             metric_logger.meters['Acc@1'].update(acc1.item(), n=input.shape[0])
             metric_logger.meters['Acc@5'].update(acc5.item(), n=input.shape[0])
 
+            if use_density:
+                feats = {'frozen': cls_features, 'prompted': output['pre_logits']}
+                for head, pred in density.predict(feats, logits).items():
+                    head_correct[head] = head_correct.get(head, 0) + (pred == target).sum().item()
+                head_total += target.shape[0]
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
           .format(top1=metric_logger.meters['Acc@1'], top5=metric_logger.meters['Acc@5'], losses=metric_logger.meters['Loss']))
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    if use_density:
+        stats['density'] = {h: 100.0 * c / head_total for h, c in head_correct.items()}
+    return stats
 
 
 @torch.no_grad()
 def evaluate_till_now(model: torch.nn.Module, original_model: torch.nn.Module, data_loader, 
-                    device, task_id=-1, class_mask=None, acc_matrix=None, args=None,):
+                    device, task_id=-1, class_mask=None, acc_matrix=None, args=None,
+                    density=None, head_metrics=None, head_prefix='density_heads'):
     stat_matrix = np.zeros((3, args.num_tasks)) # 3 for Acc@1, Acc@5, Loss
 
     for i in range(task_id+1):
         test_stats = evaluate(model=model, original_model=original_model, data_loader=data_loader[i]['val'], 
-                            device=device, task_id=i, class_mask=class_mask, args=args)
+                            device=device, task_id=i, class_mask=class_mask, args=args, density=density)
 
         stat_matrix[0, i] = test_stats['Acc@1']
         stat_matrix[1, i] = test_stats['Acc@5']
         stat_matrix[2, i] = test_stats['Loss']
 
         acc_matrix[i, task_id] = test_stats['Acc@1']
+
+        if head_metrics is not None and 'density' in test_stats:
+            for head, acc in test_stats['density'].items():
+                head_metrics.update(head, i, task_id, acc)
     
     avg_stat = np.divide(np.sum(stat_matrix, axis=1), task_id+1)
 
@@ -170,11 +187,53 @@ def evaluate_till_now(model: torch.nn.Module, original_model: torch.nn.Module, d
         result_str += "\tForgetting: {:.4f}\tBackward: {:.4f}".format(forgetting, backward)
     print(result_str)
 
+    if head_metrics is not None and head_metrics.acc:
+        head_stats = head_metrics.end_task(task_id)
+        head_metrics.log_table(task_id, head_stats)
+        if args.output_dir and utils.is_main_process():
+            head_metrics.save(args.output_dir, task_id, head_stats, prefix=head_prefix, config=density.config())
+
     return test_stats
+
+def _get_rng_state():
+    state = {'torch': torch.get_rng_state(), 'numpy': np.random.get_state(), 'python': random.getstate()}
+    if torch.cuda.is_available():
+        state['cuda'] = torch.cuda.get_rng_state_all()
+    return state
+
+def _set_rng_state(state):
+    torch.set_rng_state(state['torch'])
+    np.random.set_state(state['numpy'])
+    random.setstate(state['python'])
+    if 'cuda' in state:
+        torch.cuda.set_rng_state_all(state['cuda'])
+
+@torch.no_grad()
+def consolidate_density_heads(model: torch.nn.Module, original_model: torch.nn.Module, data_loader,
+                              device, task_id, density, args=None):
+    """Add class states of the current task, using its train split with the eval transform.
+    RNG state is restored afterwards so enabling the heads does not change later training."""
+    rng_state = _get_rng_state()
+    model.eval()
+    original_model.eval()
+    feats = {s: [] for s in density.sources}
+    labels = []
+    for input, target in data_loader:
+        input = input.to(device, non_blocking=True)
+        cls_features = original_model(input)['pre_logits']
+        # same call as in evaluate(): prompts are selected by key matching, not by the true task id
+        output = model(input, task_id=task_id, cls_features=cls_features)
+        batch_feats = {'frozen': cls_features, 'prompted': output['pre_logits']}
+        for s in density.sources:
+            feats[s].append(batch_feats[s].float().cpu())
+        labels.append(target.cpu())
+    density.add_task({s: torch.cat(v) for s, v in feats.items()}, torch.cat(labels))
+    _set_rng_state(rng_state)
+    print(f'Density heads: stored {len(density)} classes after task {task_id + 1}')
 
 def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Module, original_model: torch.nn.Module, 
                     criterion, data_loader: Iterable, optimizer: torch.optim.Optimizer, lr_scheduler, device: torch.device, 
-                    class_mask=None, args = None,):
+                    class_mask=None, args = None, density=None, head_metrics=None):
 
     # create matrix to save end-of-task accuracies 
     acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
@@ -237,8 +296,13 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             if lr_scheduler:
                 lr_scheduler.step(epoch)
 
+        if density is not None:
+            consolidate_density_heads(model, original_model, data_loader[task_id]['train_eval'],
+                                      device, task_id, density, args)
+
         test_stats = evaluate_till_now(model=model, original_model=original_model, data_loader=data_loader, device=device, 
-                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args)
+                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,
+                                    density=density, head_metrics=head_metrics)
         if args.output_dir and utils.is_main_process():
             Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
             
@@ -251,11 +315,13 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 }
             if args.sched is not None and args.sched != 'constant':
                 state_dict['lr_scheduler'] = lr_scheduler.state_dict()
+            if density is not None:
+                state_dict['density_bank'] = density.state_dict()
             
             utils.save_on_master(state_dict, checkpoint_path)
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-            **{f'test_{k}': v for k, v in test_stats.items()},
+            **{f'test_{k}': v for k, v in test_stats.items() if k != 'density'},
             'epoch': epoch,}
 
         if args.output_dir and utils.is_main_process():

@@ -428,7 +428,8 @@ class CUB200(torch.utils.data.Dataset):
         self.filename = 'CUB200(2011).zip'
 
         fpath = os.path.join(root, self.filename)
-        if not os.path.isfile(fpath):
+        # an already extracted and split CUB_200_2011/ folder needs no archive
+        if not os.path.isfile(fpath) and not os.path.exists(os.path.join(root, 'CUB_200_2011')):
             if not download:
                raise RuntimeError('Dataset not found. You can use download=True to download it')
             else:

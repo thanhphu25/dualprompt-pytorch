@@ -18,8 +18,21 @@ import math
 from collections import defaultdict, deque
 import datetime
 
+import argparse
+
 import torch
 import torch.distributed as dist
+
+
+def str2bool(v):
+    # argparse's type=bool treats any non-empty string (including "False") as True
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('1', 'true', 'yes', 'y'):
+        return True
+    if v.lower() in ('0', 'false', 'no', 'n'):
+        return False
+    raise argparse.ArgumentTypeError('boolean expected')
 
 class SmoothedValue(object):
     """Track a series of values and provide access to smoothed values over a
