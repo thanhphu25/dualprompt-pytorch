@@ -231,7 +231,60 @@ def consolidate_density_heads(model: torch.nn.Module, original_model: torch.nn.M
     _set_rng_state(rng_state)
     print(f'Density heads: stored {len(density)} classes after task {task_id + 1}')
 
-def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Module, original_model: torch.nn.Module, 
+@torch.no_grad()
+def _forward_features(model, original_model, data_loader, device, task_id, class_mask=None, args=None):
+    """Same forward as evaluate(): frozen / prompted pre_logits and (masked) logits, on CPU in float32."""
+    out = {'frozen': [], 'prompted': [], 'logits': [], 'target': []}
+    for input, target in data_loader:
+        input = input.to(device, non_blocking=True)
+        cls_features = original_model(input)['pre_logits']
+        output = model(input, task_id=task_id, cls_features=cls_features)
+        logits = output['logits']
+        if args is not None and args.task_inc and class_mask is not None:
+            mask = torch.tensor(class_mask[task_id], dtype=torch.int64).to(device)
+            logits = logits + torch.ones_like(logits).mul(float('-inf')).index_fill(1, mask, 0.0)
+        out['frozen'].append(cls_features.float().cpu())
+        out['prompted'].append(output['pre_logits'].float().cpu())
+        out['logits'].append(logits.float().cpu())
+        out['target'].append(target.cpu())
+    return {k: torch.cat(v) for k, v in out.items()}
+
+@torch.no_grad()
+def dump_density_features(model, original_model, data_loader, device, task_id, class_mask=None, args=None):
+    """Save the features needed by density_sweep.py for the checkpoint of task `task_id`:
+      train: full train split of the current task (class statistics are written once, from this model);
+      val:   every `density_val_every`-th train sample of each earlier task, re-encoded by this model
+             (the same positions of the current task are taken from `train`);
+      test:  every test split seen so far. Frozen features do not depend on the checkpoint, so they are
+             stored only for the current task and read back from the earlier dumps."""
+    rng_state = _get_rng_state()
+    model.eval()
+    original_model.eval()
+    every = args.density_val_every
+    fwd = lambda loader, i: _forward_features(model, original_model, loader, device, i, class_mask, args)
+    dump = {'task': task_id, 'val_every': every, 'train': fwd(data_loader[task_id]['train_eval'], task_id),
+            'val': {}, 'test': {}}
+    for i in range(task_id):
+        loader = data_loader[i]['train_eval']
+        subset = torch.utils.data.Subset(loader.dataset, list(range(0, len(loader.dataset), every)))
+        dump['val'][i] = fwd(torch.utils.data.DataLoader(subset, batch_size=loader.batch_size,
+                                                         num_workers=loader.num_workers,
+                                                         pin_memory=loader.pin_memory), i)
+        del dump['val'][i]['frozen']
+    accs = []
+    for i in range(task_id + 1):
+        test = fwd(data_loader[i]['val'], i)
+        accs.append(100.0 * (test['logits'].argmax(1) == test['target']).float().mean().item())
+        if i < task_id:
+            del test['frozen']
+        dump['test'][i] = test
+    os.makedirs(args.density_dump_dir, exist_ok=True)
+    torch.save(dump, os.path.join(args.density_dump_dir, f'task{task_id + 1}.pt'))
+    _set_rng_state(rng_state)
+    print(f'Dumped features after task {task_id + 1}: {len(dump["train"]["target"])} train samples, '
+          f'linear Acc@1 per test task {[round(a, 2) for a in accs]} (avg {np.mean(accs):.2f})')
+
+def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Module, original_model: torch.nn.Module,
                     criterion, data_loader: Iterable, optimizer: torch.optim.Optimizer, lr_scheduler, device: torch.device, 
                     class_mask=None, args = None, density=None, head_metrics=None):
 

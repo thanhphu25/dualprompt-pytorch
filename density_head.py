@@ -43,6 +43,11 @@ def add_density_args(parser):
                         help='weight of log p_pgm(prompted) in dual_pgm_fusion (default: --density_fusion_weight)')
     parser.add_argument('--density_lda_shrink', default=0.1, type=float,
                         help='LDA covariance shrinkage towards (trace/D) I')
+    parser.add_argument('--density_dump_dir', default='', type=str,
+                        help='with --eval: dump train/val/test features of every task checkpoint here '
+                             'for density_sweep.py (the evaluation itself is skipped)')
+    parser.add_argument('--density_val_every', default=10, type=int,
+                        help='every k-th train sample of a task is held out as validation in density_sweep.py')
 
 
 class ClassBank:

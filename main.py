@@ -123,6 +123,11 @@ def main(args):
             else:
                 print('No checkpoint found at:', checkpoint_path)
                 return
+            if args.density_dump_dir:
+                # features for the offline head sweep (density_sweep.py); replaces the evaluation
+                if utils.is_main_process():
+                    dump_density_features(model, original_model, data_loader, device, task_id, class_mask, args)
+                continue
             if density is not None:
                 if 'density_bank' in checkpoint:
                     # keep --density_ranks / weights / eps from the command line, not the ones saved at training

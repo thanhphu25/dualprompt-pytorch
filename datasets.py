@@ -112,7 +112,7 @@ def build_continual_dataloader(args):
 
         loaders = {'train': data_loader_train, 'val': data_loader_val}
 
-        if getattr(args, 'density_heads', False):
+        if getattr(args, 'density_heads', False) or getattr(args, 'density_dump_dir', ''):
             # train split with the eval transform, used to build class statistics after each task
             loaders['train_eval'] = torch.utils.data.DataLoader(
                 _with_transform(dataset_train, transform_val, eval_copies),
